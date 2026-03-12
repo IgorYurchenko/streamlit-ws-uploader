@@ -78,11 +78,16 @@
   let currentArgs = {};
 
   function sendReady() {
-    PARENT.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+    PARENT.postMessage({
+      isStreamlitMessage: true,
+      type: "streamlit:componentReady",
+      apiVersion: 1
+    }, "*");
   }
 
   function setFrameHeight(h) {
     PARENT.postMessage({
+      isStreamlitMessage: true,
       type: "streamlit:setFrameHeight",
       height: h || document.body.scrollHeight
     }, "*");
@@ -90,7 +95,9 @@
 
   function setComponentValue(value) {
     PARENT.postMessage({
+      isStreamlitMessage: true,
       type: "streamlit:setComponentValue",
+      dataType: "json",
       value: value
     }, "*");
   }
