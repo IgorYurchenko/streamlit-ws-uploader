@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Source Sans Pro", sans-serif;
+    background: transparent;
+    color: rgba(255,255,255,.85);
+    padding: 0;
+  }
+  .drop-zone {
+    border: 2px dashed rgba(255,255,255,.2);
+    border-radius: 8px;
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: #ff4b4b;
+    background: rgba(255,75,75,.06);
+  }
+  .drop-zone .icon { font-size: 32px; margin-bottom: 8px; }
+  .drop-zone .label {
+    font-size: 14px;
+    color: rgba(255,255,255,.5);
+    line-height: 1.5;
+  }
+  .drop-zone .label b { color: #ff4b4b; }
+  .file-input { display: none; }
+
+  .preview-area {
+    margin-top: 12px;
+    text-align: center;
+  }
+  .preview-area img {
+    max-width: 100%;
+    border-radius: 6px;
+  }
+  .file-name {
+    font-size: 12px;
+    color: rgba(255,255,255,.4);
+    margin-top: 6px;
+    word-break: break-all;
+  }
+  .status {
+    font-size: 12px;
+    margin-top: 8px;
+    color: rgba(255,255,255,.4);
+  }
+  .status.error { color: #ff4b4b; }
+  .status.ok { color: #21c354; }
+</style>
+</head>
+<body>
+  <div class="drop-zone" id="dropZone">
+    <div class="icon">📤</div>
+    <div class="label">
+      Drag &amp; drop an image or <b>browse</b><br/>
+      <span style="font-size:12px;">JPG, PNG, WebP</span>
+    </div>
+    <input class="file-input" id="fileInput"
+           type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" />
+  </div>
+  <div class="preview-area" id="previewArea" style="display:none;">
+    <img id="previewImg" alt="preview" />
+    <div class="file-name" id="fileName"></div>
+  </div>
+  <div class="status" id="status"></div>
+
+<script>
+(function() {
+  /* ── Streamlit postMessage protocol ───────────────────────── */
+  const PARENT = window.parent;
+  let currentArgs = {};
+
+  function sendReady() {
+    PARENT.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+  }
+
+  function setFrameHeight(h) {
+    PARENT.postMessage({
+      type: "streamlit:setFrameHeight",
+      height: h || document.body.scrollHeight
+    }, "*");
+  }
+
+  function setComponentValue(value) {
+    PARENT.postMessage({
+      type: "streamlit:setComponentValue",
+      value: value
+    }, "*");
+  }
+
+  window.addEventListener("message", function(e) {
+    if (e.data.type === "streamlit:render") {
+      currentArgs = e.data.args || {};
+      // If we already have a value from Streamlit (re-render), show it
+      if (currentArgs.default && typeof currentArgs.default === "string"
+          && currentArgs.default.startsWith("data:image")) {
+        showPreview(currentArgs.default, "");
+      }
+      setTimeout(function() { setFrameHeight(); }, 50);
+    }
+  });
+
+  /* ── File handling ────────────────────────────────────────── */
+  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+  const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const previewArea = document.getElementById("previewArea");
+  const previewImg = document.getElementById("previewImg");
+  const fileNameEl = document.getElementById("fileName");
+  const statusEl = document.getElementById("status");
+
+  function showStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = "status " + (cls || "");
+    setTimeout(function() { setFrameHeight(); }, 50);
+  }
+
+  function showPreview(dataUrl, name) {
+    previewImg.src = dataUrl;
+    fileNameEl.textContent = name;
+    previewArea.style.display = "block";
+    setTimeout(function() { setFrameHeight(); }, 100);
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+
+    if (!ACCEPTED.includes(file.type)) {
+      showStatus("Unsupported format. Use JPG, PNG, or WebP.", "error");
+      return;
+    }
+    if (file.size > MAX_SIZE) {
+      showStatus("File too large (max 10 MB).", "error");
+      return;
+    }
+
+    showStatus("Reading file…", "");
+
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var dataUrl = ev.target.result;
+      showPreview(dataUrl, file.name);
+      showStatus("Sending via WebSocket…", "");
+
+      // Send through postMessage → Streamlit frontend → WebSocket → Python
+      setComponentValue(dataUrl);
+      showStatus("Uploaded (" + (file.size / 1024).toFixed(0) + " KB)", "ok");
+    };
+    reader.onerror = function() {
+      showStatus("Failed to read file.", "error");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /* ── UI events ────────────────────────────────────────────── */
+  dropZone.addEventListener("click", function() { fileInput.click(); });
+  fileInput.addEventListener("change", function() {
+    if (fileInput.files.length) handleFile(fileInput.files[0]);
+  });
+
+  dropZone.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    dropZone.classList.add("dragover");
+  });
+  dropZone.addEventListener("dragleave", function() {
+    dropZone.classList.remove("dragover");
+  });
+  dropZone.addEventListener("drop", function(e) {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+
+  /* ── Init ─────────────────────────────────────────────────── */
+  sendReady();
+  setTimeout(function() { setFrameHeight(); }, 100);
+})();
+</script>
+</body>
+</html>
